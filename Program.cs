@@ -1,13 +1,17 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using NAudio.Wave;
+using ProjectToroidDemo;
+using System.ComponentModel.DataAnnotations;
 using System.Drawing;
+using System.Numerics;
 using System.Reflection;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 public interface IMap
 {
     void Create(Player player);
-    void Map();
+    void Map(bool target);
     void TileCreator(IObject[,] map, int numberOfTiles, IObject objectName, int size);
     void Atach(ISpawner spawner);
     void Detach(ISpawner spawner);
@@ -19,8 +23,8 @@ public interface IObject
     int X(int x);
     int Y(int y);
     void Apearance(bool targeted);
-    bool ApplyDmg();
-    void Colision();
+    bool ApplyDmg(int dmg);
+    void Colision(IObject name);
 }
 
 public interface ISpawner
@@ -39,14 +43,16 @@ public class EnemiesSpawner : ISpawner
 
     public void Update()
     {
-        Console.WriteLine("You slain an enemy");
+        Random roll = new();        
+        dungeon.UpdateMess1 = true;
         dungeon.Enemies--;
         dungeon.Killcount++;
         if (dungeon.Enemies < 1)
         {
             dungeon.MaxEnemies++; dungeon.Enemies = dungeon.MaxEnemies;
             dungeon.TileCreator(dungeon.DungeonMap, dungeon.MaxEnemies, new Enemy(), dungeon.Size);
-            Console.WriteLine("{0} new enemies just spawned", dungeon.MaxEnemies);
+            dungeon.TileCreator(dungeon.DungeonMap, roll.Next(1,4), new Potion(), dungeon.Size);
+            dungeon.UpdateMess2 = true;
         }
     }
 }
@@ -66,6 +72,8 @@ public class Dungeon : IMap
     public IObject[,] DungeonMap { get => dungeon; set => dungeon = value; }
     public int Size { get => size; set => size = value; }
     public int Killcount { get; set; }
+    public bool UpdateMess1 { get; set; }
+    public bool UpdateMess2 {  get; set; }
 
 
     public Dungeon(int size, IObject[,] dungeon, int  maxEnemies, Player player)
@@ -109,11 +117,20 @@ public class Dungeon : IMap
         TileCreator(dungeon, maxEnemies, new Enemy(), size);
     }
 
-    public void Map()
+    public void Map(bool target)
     {
-        Console.WriteLine("Kill counter {0}", Killcount);
+        Console.Write("Kill counter {0}", Killcount);
+        if (target)
+        {
+            Console.WriteLine("\t\t\t     Target:ON");
+        }
+        else
+        {
+            Console.WriteLine("\t\t\t     Target:OFF");
+        }
         for (int y = 0; y < size; y++)
         {
+            Console.Write("X");
             for (int x = 0; x < size; x++)
             {               
                 if (dungeon[x, y] == null)
@@ -122,7 +139,7 @@ public class Dungeon : IMap
                     {
                         Console.Write("{ }");
                     }
-                    else Console.Write("   ");
+                    else Console.Write(": :");
                 }
                 else
                 {
@@ -134,6 +151,16 @@ public class Dungeon : IMap
                 }
             }
             Console.WriteLine("X");
+        }
+        if (UpdateMess1)
+        {
+            Console.WriteLine("You slain an enemy");
+            UpdateMess1 = false;
+        }
+        if (UpdateMess2)
+        {
+            Console.WriteLine("{0} new enemies just spawned", MaxEnemies);
+            UpdateMess2 = false;
         }
     }
     public void Move()
@@ -153,7 +180,7 @@ public class Dungeon : IMap
                     playerX = x;
                     player = (Player)dungeon[x, y];
                     Console.Clear();
-                    Map();
+                    Map(target);
                     player.HpBar();
                 }
             }
@@ -162,7 +189,8 @@ public class Dungeon : IMap
         {
             if (target)
             {
-                Map();
+                Console.Clear();
+                Map(target);
                 player.HpBar();
             }
             do
@@ -178,7 +206,7 @@ public class Dungeon : IMap
                     else
                     {
                         dungeon[playerX, playerY] = null;
-                        playerY--; if (playerY < 0) playerY ++;
+                        playerY--; if (playerY < 0) playerY += size;
                     }
                     break;
                 }
@@ -191,7 +219,7 @@ public class Dungeon : IMap
                     else
                     {
                         dungeon[playerX, playerY] = null;
-                        playerY++; if (playerY >= size) playerY --;
+                        playerY++; if (playerY >= size) playerY -= size;
                     }
                     break;
                 }
@@ -204,7 +232,7 @@ public class Dungeon : IMap
                     else
                     {
                         dungeon[playerX, playerY] = null;
-                        playerX--; if (playerX < 0) playerX ++;
+                        playerX--; if (playerX < 0) playerX += size;
                     }
                     break;
                 }
@@ -217,7 +245,7 @@ public class Dungeon : IMap
                     else
                     {
                         dungeon[playerX, playerY] = null;
-                        playerX++; if (playerX >= size) playerX --;
+                        playerX++; if (playerX >= size) playerX -= size;
                     }
                     break;
                 }
@@ -231,7 +259,7 @@ public class Dungeon : IMap
                 {
                     if (dungeon[targetX, targetY] is Enemy)
                     {
-                        if (!dungeon[targetX, targetY].ApplyDmg()) 
+                        if (!dungeon[targetX, targetY].ApplyDmg(1)) 
                         {
                             dungeon[targetX, targetY] = null;
                             Notify();                            
@@ -242,15 +270,36 @@ public class Dungeon : IMap
                 }
             } while (keyInfo.Key != ConsoleKey.Escape);
             if (!target) break;
-            else Console.Clear();
-            
+            else Console.Clear();            
         }
         if (dungeon[playerX, playerY] is Enemy)
         {
-            player.Colision();
+            dungeon[playerX, playerY].Colision(player);
             Notify();
         }
-        dungeon[playerX, playerY] = player;
+        else if (dungeon[playerX,playerY] is Potion)
+        {
+            dungeon[playerX, playerY].Colision(player);
+        }
+        
+        dungeon[playerX, playerY] = player;        
+    }
+    public void EnemyMove()
+    {
+        int playerY = 0;
+        int playerX = 0;
+        Enemy enemy = new Enemy();
+        for (int x = 0; x < size; x++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                if (dungeon[x, y] is Player)
+                {
+                    playerY = y;
+                    playerX = x;
+                }
+            }
+        }
         //movement of enemy
         for (int X = 0; X < size; X++)
         {
@@ -258,14 +307,15 @@ public class Dungeon : IMap
             {
                 if (dungeon[X, Y] is Enemy)
                 {
+                    enemy = (Enemy)dungeon[X, Y];
                     int hold;
-                    if (playerY < Y)
+                    if (playerY < Y && enemy.CanMove)
                     {
                         hold = Y - 1;
                         if (dungeon[X, hold] is Enemy) ;
                         else if (dungeon[X, hold] is Player)
                         {
-                            dungeon[X, hold].Colision();
+                            dungeon[X, Y].Colision(dungeon[X, hold]);
                             dungeon[X, Y] = null;
                             Notify();
                         }
@@ -275,13 +325,13 @@ public class Dungeon : IMap
                             dungeon[X, Y] = null;
                         }
                     }
-                    else if (playerY > Y)
+                    else if (playerY > Y && enemy.CanMove)
                     {
                         hold = Y + 1;
                         if (dungeon[X, hold] is Enemy) ;
                         else if (dungeon[X, hold] is Player)
                         {
-                            dungeon[X, hold].Colision();
+                            dungeon[X, Y].Colision(dungeon[X, hold]);
                             dungeon[X, Y] = null;
                             Notify();
                         }
@@ -291,13 +341,13 @@ public class Dungeon : IMap
                             dungeon[X, Y] = null;
                         }
                     }
-                    else if (playerX < X)
+                    else if (playerX < X && enemy.CanMove)
                     {
                         hold = X - 1;
                         if (dungeon[hold, Y] is Enemy) ;
                         else if (dungeon[hold, Y] is Player)
                         {
-                            dungeon[hold, Y].Colision();
+                            dungeon[X, Y].Colision(dungeon[hold, Y]);
                             dungeon[X, Y] = null;
                             Notify();
                         }
@@ -307,13 +357,13 @@ public class Dungeon : IMap
                             dungeon[X, Y] = null;
                         }
                     }
-                    else if (playerX > X)
+                    else if (playerX > X && enemy.CanMove)
                     {
                         hold = X + 1;
                         if (dungeon[hold, Y] is Enemy) ;
                         else if (dungeon[hold, Y] is Player)
                         {
-                            dungeon[hold, Y].Colision();
+                            dungeon[X, Y].Colision(dungeon[hold, Y]);
                             dungeon[X, Y] = null;
                             Notify();
                         }
@@ -323,6 +373,18 @@ public class Dungeon : IMap
                             dungeon[X, Y] = null;
                         }
                     }
+                    enemy.CanMove = false;
+                }
+            }
+        }
+        foreach (var e in dungeon)
+        {
+            if(e != null)
+            {
+                if (e is Enemy)
+                {
+                    enemy = e as Enemy;
+                    enemy.CanMove = true;
                 }
             }
         }
@@ -416,6 +478,47 @@ public class Dungeon : IMap
         return zero;
     }
 }
+public class Potion : IObject
+{
+    private int hp = 2;
+    public int Hp { get => hp; }
+    private int x;
+    private int y;
+
+    public int X(int x)
+    {
+        if (x >= 0) this.x = x;
+        return this.x;
+    }
+    public int Y(int y)
+    {
+        if (y >= 0) this.y = y;
+        return this.y;
+    }
+    public void Apearance(bool targeted)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        if (targeted)
+        {
+            Console.Write("{H}");
+        }
+        else
+        {
+            Console.Write(" H ");
+        }
+        Console.ForegroundColor = ConsoleColor.White;
+    }
+
+    public bool ApplyDmg(int dmg)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void Colision(IObject name)
+    {
+        name.ApplyDmg(-1);
+    }
+}
 
 public class Enemy : IObject
 {
@@ -423,6 +526,8 @@ public class Enemy : IObject
     public int Hp { get => hp; }
     private int x;
     private int y;
+    private bool canMove = false;
+    public bool CanMove { get => canMove; set => canMove = value; }
 
     public int X(int x) 
     {
@@ -436,37 +541,36 @@ public class Enemy : IObject
     }  
     public void Apearance(bool targeted)
     {
+        if (hp > 1) Console.ForegroundColor = ConsoleColor.DarkYellow;
+        else Console.ForegroundColor = ConsoleColor.Red;
         if (targeted)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
             Console.Write("{E}");
-            Console.ForegroundColor = ConsoleColor.White;
         }
         else 
         {
-            Console.ForegroundColor = ConsoleColor.Red;
             Console.Write(" E ");
-            Console.ForegroundColor = ConsoleColor.White;
         }
+        Console.ForegroundColor = ConsoleColor.White;
     }
 
-    public bool ApplyDmg()
+    public bool ApplyDmg(int dmg)
     {
-        hp--;
+        hp = hp - dmg;
         if (hp > 0) return true;
         else return false;
     }
 
-    public void Colision()
+    public void Colision(IObject name)
     {
-        hp = 0;
+        name.ApplyDmg(1);
     }
 }
 
 public class Player : IObject
 {
-    private int maxHp = 5;
-    private int hp = 5;
+    private int maxHp = 7;
+    private int hp = 7;
     public int Hp { get => hp; }
     private int x;
     private int y;
@@ -484,9 +588,9 @@ public class Player : IObject
     public void HpBar()
     {
         int hold = maxHp - hp;
+        Console.Write("HP: {0}/{1}", hp, maxHp);
         Console.BackgroundColor = ConsoleColor.Green;
         Console.ForegroundColor = ConsoleColor.Black;
-        Console.Write("HP: {0}/{1}", hp, maxHp);
         for (int i = 0; i < hp; i++)
         {
             Console.Write("[ ]");
@@ -521,16 +625,18 @@ public class Player : IObject
         }
     }
 
-    public bool ApplyDmg()
+    public bool ApplyDmg(int dmg)
     {
-        hp--;
+        hp = hp - dmg;
+        if(hp > maxHp) { hp = maxHp; }
+
         if (hp > 0) return true;
         else return false;
     }
 
-    public void Colision()
+    public void Colision(IObject name)
     {
-        hp--;
+        name.ApplyDmg(2);
     }
 }
 
@@ -541,16 +647,51 @@ class Program
         int size = 15;
         IObject[,] dungeon = new IObject[size,size];
         Player player = new Player();
-        Dungeon forest = new Dungeon(size,dungeon,2,player);
+        Dungeon forest = new Dungeon(size,dungeon,2, player);
         EnemiesSpawner spawner = new EnemiesSpawner(forest);
         forest.Atach(spawner);
+        //
+        // Get the current directory of the executable
+        string currentDirectory = AppDomain.CurrentDomain.BaseDirectory;
 
-        do
+        // Specify the folder name within your project
+        string folderName = "sound/FunRetroGame.mp3";
+
+        // Replace "path/to/your/soundfile.wav" with the path to your sound file
+        string soundFilePath = Path.Combine(currentDirectory, folderName);
+
+        // Create a WaveOutEvent to play the sound
+        using (var waveOut = new WaveOutEvent())
         {
-            forest.Move();
-        } while (player.Hp>0);
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("YOU DIED");
-        Console.WriteLine("You slained {0}", forest.Killcount);
+            // Create a WaveFileReader with the sound file path
+            using (var reader = new Mp3FileReader(soundFilePath))
+            using (var pcmStream = WaveFormatConversionStream.CreatePcmStream(reader))
+            {
+                
+                // Create a LoopStream to loop the sound continuously
+                var loopStream = new LoopStream(pcmStream);
+                var volumeProvider = new VolumeWaveProvider16(loopStream);
+                volumeProvider.Volume = 0.2f; // Set the volume level here (0.0 to 1.0)
+
+                waveOut.Init(volumeProvider);
+
+                // Start playing the sound in the background
+                waveOut.Play();
+                Console.WriteLine("WASD - move, Q - target mode, E - atack");
+                Console.ReadLine();
+                do
+                {
+                    forest.Move();
+                    forest.EnemyMove();
+                } while (player.Hp > 0);
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("YOU DIED");
+                Console.WriteLine("You slained {0}", forest.Killcount);
+                Console.ReadKey();
+
+
+            }
+        }
+        //s
     }
 }
